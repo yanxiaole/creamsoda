@@ -29,6 +29,7 @@ class ParallelCollection[T: ClassTag](
   override def compute(s: Split): Iterator[T] =
     s.asInstanceOf[ParallelCollectionSplit[T]].iterator
 
+  override val dependencies: List[Dependency[_]] = Nil
 }
 
 private object ParallelCollection {

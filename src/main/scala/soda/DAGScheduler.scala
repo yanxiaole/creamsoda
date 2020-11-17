@@ -57,7 +57,7 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
 
       val outputParts = partitions.toArray
       val numOutputParts: Int = partitions.size
-      val finalStage = newStage()
+      val finalStage = newStage(finalRdd)
       val results = new Array[U](numOutputParts)
       val finished = new Array[Boolean](numOutputParts)
       var numFinished = 0
@@ -136,12 +136,28 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
 
   def getMissingParentStages(stage: Stage): List[Stage] = {
     val missing = new mutable.HashSet[Stage]
+    val visited = new mutable.HashSet[RDD[_]]()
+    def visit(rdd: RDD[_]): Unit = {
+      if (!visited(rdd)) {
+        visited += rdd
+        for (dep <- rdd.dependencies) {
+          dep match {
+            case narrowDep: NarrowDependency[_] =>
+              visit(narrowDep.rdd)
+            case shuffleDep: ShuffleDependency[_] =>
+              ???
+          }
+        }
+      }
+    }
+
+    visit(stage.rdd)
     missing.toList
   }
 
-  def newStage(): Stage = {
+  def newStage(rdd: RDD[_]): Stage = {
     val id = nextStageId.getAndIncrement()
-    val stage = new Stage(id)
+    val stage = new Stage(id, rdd)
     idToStage(id) = stage
     stage
   }

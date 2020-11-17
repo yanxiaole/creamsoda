@@ -1,5 +1,6 @@
 package soda
 
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 /**
@@ -25,6 +26,7 @@ abstract class RDD[T: ClassTag](@transient sc: SparkContext) extends Serializabl
 
   def splits: Array[Split]
   def compute(split: Split): Iterator[T]
+  val dependencies: List[Dependency[_]]
 
   def context: SparkContext = sc
 
@@ -36,6 +38,12 @@ abstract class RDD[T: ClassTag](@transient sc: SparkContext) extends Serializabl
 
   def map[U: ClassTag](f: T => U): RDD[U] = new MappedRDD[U, T](this, f)
 
+  def collect(): Array[T] = {
+    val results = sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
+    println(results)
+    Array.concat(results: _*)
+  }
+
   def count(): Long = {
     sc.runJob(this, (iter: Iterator[T]) => {
       var result = 0L
@@ -46,6 +54,26 @@ abstract class RDD[T: ClassTag](@transient sc: SparkContext) extends Serializabl
       result
     }).sum
   }
+
+  def reduce(f: (T, T) => T): T = {
+    val reducePartition: Iterator[T] => Option[T] = iter => {
+      if (iter.hasNext) {
+        Some(iter.reduceLeft(f))
+      } else {
+        None
+      }
+    }
+    val options = sc.runJob(this, reducePartition)
+    val results = new ArrayBuffer[T]
+    for (opt <- options; elem <- opt) {
+      results += elem
+    }
+    if (results.size == 0) {
+      throw new UnsupportedOperationException("empty collection")
+    } else {
+      results.reduceLeft(f)
+    }
+  }
 }
 
 class MappedRDD[U: ClassTag, T: ClassTag](
@@ -54,5 +82,6 @@ class MappedRDD[U: ClassTag, T: ClassTag](
   extends RDD[U](prev.context) {
 
   override def splits: Array[Split] = prev.splits
+  override val dependencies = List(new OneToOneDependency[T](prev))
   override def compute(split: Split): Iterator[U] = prev.compute(split).map(f)
 }

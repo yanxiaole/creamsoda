@@ -3,10 +3,10 @@ package soda.example
 import com.typesafe.scalalogging.LazyLogging
 import soda.SparkContext
 
-object CountTest extends LazyLogging {
+object NarrowDepTest extends LazyLogging {
   def main(args: Array[String]) {
     if (args.length == 0) {
-      System.err.println("Usage: CountTest <host> [numMappers]")
+      System.err.println("Usage: NarrowDepTest <host> [numMappers]")
       System.exit(1)
     }
 
@@ -14,9 +14,12 @@ object CountTest extends LazyLogging {
 
     val sc = new SparkContext(args(0), "GroupBy Test")
 
-    val pair = sc.parallelize(0 until numMappers, numMappers)
-    println(pair.count)
+    val pair =
+      sc.parallelize(0 until numMappers, numMappers)
+        .map { p => p + 10 }
+        .map { p => p % 3 }
 
+    println(pair.collect().toList)
     System.exit(0)
   }
 
