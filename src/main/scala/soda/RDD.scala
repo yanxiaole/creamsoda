@@ -38,6 +38,9 @@ abstract class RDD[T: ClassTag](@transient sc: SparkContext) extends Serializabl
 
   def map[U: ClassTag](f: T => U): RDD[U] = new MappedRDD[U, T](this, f)
 
+  def flatMap[U: ClassTag](f: T => TraversableOnce[U]): RDD[U] =
+    new FlatMappedRDD(this, f)
+
   def collect(): Array[T] = {
     val results = sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
     println(results)
@@ -84,4 +87,14 @@ class MappedRDD[U: ClassTag, T: ClassTag](
   override def splits: Array[Split] = prev.splits
   override val dependencies = List(new OneToOneDependency[T](prev))
   override def compute(split: Split): Iterator[U] = prev.compute(split).map(f)
+}
+
+class FlatMappedRDD[U: ClassTag, T: ClassTag](
+    prev: RDD[T],
+    f: T => TraversableOnce[U])
+  extends RDD[U](prev.context) {
+
+  override def splits: Array[Split] = prev.splits
+  override val dependencies: List[Dependency[_]] = List(new OneToOneDependency[T](prev))
+  override def compute(split: Split): Iterator[U] = prev.compute(split).flatMap(f)
 }
