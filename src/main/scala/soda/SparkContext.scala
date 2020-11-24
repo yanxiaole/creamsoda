@@ -11,7 +11,7 @@ class SparkContext(
     appName: String)
   extends LazyLogging {
 
-  val env: SparkEnv = SparkEnv.create()
+  val env: SparkEnv = SparkEnv.create(true)
   SparkEnv.set(env)
 
   private val scheduler = {
@@ -43,8 +43,19 @@ class SparkContext(
   def defaultParallelism: Int = 4
 
   private var nextRddId = new AtomicInteger(0)
+  private var nextShuffleId = new AtomicInteger(0)
+
+  private[soda] def newShuffleId(): Int = {
+    nextShuffleId.getAndIncrement()
+  }
 
   private[soda] def newRddId(): Int = {
     nextRddId.getAndIncrement()
   }
+}
+
+object SparkContext {
+  implicit def rddToPairRDDFunctions[K: ClassTag, V: ClassTag](rdd: RDD[(K, V)]) =
+    new PairRDDFunctions[K, V](rdd)
+
 }

@@ -1,7 +1,8 @@
 package soda
 
 class SparkEnv (
-  val serializer: Serializer
+    val serializer: Serializer,
+    val mapOutputTracker: MapOutputTracker
 )
 
 object SparkEnv {
@@ -18,11 +19,13 @@ object SparkEnv {
     env
   }
 
-  def create(): SparkEnv = {
+  def create(isMaster: Boolean): SparkEnv = {
     val serializerClass =
       System.getProperty("soda.serializer", "soda.JavaSerializer")
     val serializer = Class.forName(serializerClass, true, Thread.currentThread().getContextClassLoader).newInstance().asInstanceOf[Serializer]
 
-    new SparkEnv(serializer)
+    val mapOutputTracker = new MapOutputTracker()
+
+    new SparkEnv(serializer, mapOutputTracker)
   }
 }

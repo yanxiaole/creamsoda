@@ -2,6 +2,7 @@ package soda.example
 
 import java.util.Random
 import soda.SparkContext
+import soda.SparkContext._
 
 object GroupByTest {
   def main(args: Array[String]) {
@@ -17,7 +18,6 @@ object GroupByTest {
 
     val sc = new SparkContext(args(0), "GroupBy Test")
 
-    /*
     val pairs1 = sc.parallelize(0 until numMappers, numMappers).flatMap { p =>
       val ranGen = new Random
       var arr1 = new Array[(Int, Array[Byte])](numKVPairs)
@@ -27,13 +27,12 @@ object GroupByTest {
         arr1(i) = (ranGen.nextInt(Int.MaxValue), byteArr)
       }
       arr1
-    }.cache
+    }//.cache
     // Enforce that everything has been calculated and in cache
     pairs1.count
 
-    println(pairs1.groupByKey(numReducers).count)
-
-     */
+//    println(pairs1.groupByKey(numReducers).count)
+    println(pairs1.reduceByKey((a, b) => a, numReducers).count)
 
     System.exit(0)
   }

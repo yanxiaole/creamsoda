@@ -3,6 +3,7 @@ package soda
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
 import com.typesafe.scalalogging.LazyLogging
@@ -42,11 +43,24 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
   private val eventQueues = new mutable.HashMap[Int, mutable.Queue[CompletionEvent]]
 
   val env: SparkEnv = SparkEnv.get
+  val mapOutputTracker = env.mapOutputTracker
 
   val nextRunId = new AtomicInteger(0)
   val nextStageId = new AtomicInteger(0)
 
   val idToStage = new mutable.HashMap[Int, Stage]
+
+  val shuffleToMapStage = new mutable.HashMap[Int, Stage]
+
+  def getShuffleMapStage(shuf: ShuffleDependency[_]): Stage = {
+    shuffleToMapStage.get(shuf.shuffleId) match {
+      case Some(stage) => stage
+      case None =>
+        val stage = newStage(shuf.rdd, Some(shuf))
+        shuffleToMapStage(shuf.shuffleId) = stage
+        stage
+    }
+  }
 
   override def runJob[T, U: ClassTag](
       finalRdd: RDD[T],
@@ -57,7 +71,7 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
 
       val outputParts = partitions.toArray
       val numOutputParts: Int = partitions.size
-      val finalStage = newStage(finalRdd)
+      val finalStage = newStage(finalRdd, None)
       val results = new Array[U](numOutputParts)
       val finished = new Array[Boolean](numOutputParts)
       var numFinished = 0
@@ -93,8 +107,10 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
             tasks += new ResultTask(runId, stage.id, finalRdd, func, part, id)
           }
         } else {
-          // TODO
-          logger.error("not implemented")
+          for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
+            val locs = ???
+            tasks += new ShuffleMapTask(runId, stage.id, stage.rdd, stage.shuffleDep.get, p, locs)
+          }
         }
         myPending ++= tasks
         submitTasks(tasks, runId)
@@ -118,15 +134,33 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
                 results(rt.outputId) = evt.result.asInstanceOf[U]
                 finished(rt.outputId) = true
                 numFinished += 1
-              case _ => ???
+              case smt: ShuffleMapTask =>
+                val stage = idToStage(smt.stageId)
+                stage.addOutputLoc(smt.partition, evt.result.asInstanceOf[String])
+                if (running.contains(stage) && pendingTasks(stage).isEmpty) {
+                  logger.info(stage + " finished, looking for newly runnable stages")
+                  running -= stage
+                  if (stage.shuffleDep != None) {
+                    mapOutputTracker.registerMapOutputs(
+                      stage.shuffleDep.get.shuffleId,
+                      stage.outputLocs.map(_.head).toArray)
+                  }
+                  val newlyRunnable = new ArrayBuffer[Stage]
+                  for (stage <- waiting if getMissingParentStages(stage) == Nil) {
+                    newlyRunnable += stage
+                  }
+                  waiting --= newlyRunnable
+                  running ++= newlyRunnable
+                  for (stage <- newlyRunnable) {
+                    submitMissingTasks(stage)
+                  }
+                }
             }
-
           } else {
-
+            eventQueues -= runId
+            throw new SparkException("Task failed: " + evt.task + ", reason: " + evt.reason)
           }
-
         }
-
       }
 
       eventQueues -= runId
@@ -145,7 +179,8 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
             case narrowDep: NarrowDependency[_] =>
               visit(narrowDep.rdd)
             case shuffleDep: ShuffleDependency[_] =>
-              ???
+              val stage = getShuffleMapStage(shuffleDep)
+              missing += stage
           }
         }
       }
@@ -155,9 +190,12 @@ private trait DAGScheduler extends Scheduler with LazyLogging {
     missing.toList
   }
 
-  def newStage(rdd: RDD[_]): Stage = {
+  def newStage(rdd: RDD[_], shuffleDep: Option[ShuffleDependency[_]]): Stage = {
+    if (shuffleDep != None) {
+      mapOutputTracker.registerShuffle(shuffleDep.get.shuffleId, rdd.splits.size)
+    }
     val id = nextStageId.getAndIncrement()
-    val stage = new Stage(id, rdd)
+    val stage = new Stage(id, rdd, shuffleDep)
     idToStage(id) = stage
     stage
   }
